@@ -40,8 +40,8 @@ public:
         const char* model_path = "/home/raspberry/porcupine/lib/common/porcupine_params.pv";
         const char* keyword_paths[] = {
             "/home/raspberry/voice-command-publisher/Drone-alpha_en_raspberry-pi_v3_0_0.ppn",
-            "/home/raspberry/voice-command-publisher/go-disarm_en_raspberry-pi_v3_0_0.ppn",
-            "/home/raspberry/voice-command-publisher/go-off-board_en_raspberry-pi_v3_0_0.ppn"
+            "/home/raspberry/voice-command-publisher/Go-disarm_en_raspberry-pi_v3_0_0.ppn",
+            "/home/raspberry/voice-command-publisher/mode-off-board_en_raspberry-pi_v3_0_0.ppn"
             //"/home/raspberry/voice-command-publisher/gripper--open_en_linux_v3_0_0.ppn",
             //"/home/raspberry/voice-command-publisher/gripper-close_en_linux_v3_0_0.ppn"
         };
