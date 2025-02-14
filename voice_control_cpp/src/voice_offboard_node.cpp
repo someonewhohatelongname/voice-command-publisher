@@ -13,6 +13,7 @@
 struct VehicleCommand {
     uint16_t command;
     float param1;
+    float param2 = 0.0;
     uint8_t target_system;
     uint8_t target_component;
     uint8_t source_system;
@@ -145,7 +146,7 @@ private:
                 break;
             case 2:  // "offboard"
                 std::cout << "Voice command: Offboard" << std::endl;
-                switchToOffboardMode();
+                //switchToOffboardMode();
                 break;
             case 3:  // "gripper open"
                 std::cout << "Voice command: Open Gripper" << std::endl;
