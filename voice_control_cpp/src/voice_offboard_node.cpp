@@ -218,4 +218,30 @@ private:
         if (sent < 0) {
             std::cerr << "Failed to send UDP message: " << strerror(errno) << std::endl;
         } else {
-            std::cout
+            std::cout << "Disarm command sent via UDP." << std::endl;
+        }
+    }
+
+    pv_porcupine_t* porcupine_;
+    PaStream* audio_stream_;
+    int sock_fd_;
+    struct sockaddr_in server_addr_;
+    const char* udp_ip_;
+    int udp_port_;
+};
+
+int main(int argc, char* argv[]) {
+    if (argc != 3) {
+        std::cerr << "Usage: " << argv[0] << " <udp_ip> <udp_port>" << std::endl;
+        return 1;
+    }
+    try {
+        VoiceControl controller(argv[1], std::stoi(argv[2]));
+        controller.run();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
