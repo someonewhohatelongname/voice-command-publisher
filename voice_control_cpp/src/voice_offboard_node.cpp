@@ -20,9 +20,9 @@ struct VehicleCommand {
     bool from_external;
 };
 
-class VoiceControlNode : public rclcpp::Node {
+class VoiceControlNode {
 public:
-    VoiceControlNode(const char* udp_ip, int udp_port) : Node("voice_control_node"), udp_ip_(udp_ip), udp_port_(udp_port) {
+    VoiceControlNode(const char* udp_ip, int udp_port) : udp_ip_(udp_ip), udp_port_(udp_port) {
         // Initialize UDP socket
         sock_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
         if (sock_fd_ < 0) {
@@ -35,14 +35,14 @@ public:
         inet_pton(AF_INET, udp_ip_, &server_addr_.sin_addr);
 
         // Initialize Porcupine for wake word detection
-        const char* access_key = "T0X/oYqY5ha/S5io2KywIoP1r4xfzzULLBHYAQ8YWse3NN1q1Ox5UQ==";
-        const char* model_path = "/home/hn/porcupine/lib/common/porcupine_params.pv";
+        const char* access_key = "/CtsYopLA1PZVnMC2ltd+Qmi4gFlmMIVNDdnB1uj0tccOyUIT/ssUg==";
+        const char* model_path = "/home/raspberry/porcupine/lib/common/porcupine_params.pv";
         const char* keyword_paths[] = {
-            "/home/hn/Voice_command/Drone-Alpha_en_linux_v3_0_0.ppn",
-            "/home/hn/Voice_command/go-disarm_en_linux_v3_0_0.ppn",
-            "/home/hn/Voice_command/go-off-board_en_linux_v3_0_0.ppn",
-            "/home/hn/Voice_command/gripper--open_en_linux_v3_0_0.ppn",
-            "/home/hn/Voice_command/gripper-close_en_linux_v3_0_0.ppn"
+            "/home/raspberry/voice-command-publisher/Drone-alpha_en_raspberry-pi_v3_0_0.ppn",
+            "/home/raspberry/voice-command-publisher/go-disarm_en_raspberry-pi_v3_0_0.ppn",
+            "/home/raspberry/voice-command-publisher/go-off-board_en_raspberry-pi_v3_0_0.ppn"
+            //"/home/raspberry/voice-command-publisher/gripper--open_en_linux_v3_0_0.ppn",
+            //"/home/raspberry/voice-command-publisher/gripper-close_en_linux_v3_0_0.ppn"
         };
         const float sensitivities[] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f};
 
@@ -99,7 +99,7 @@ public:
         Pa_CloseStream(audio_stream_);
         Pa_Terminate();
         pv_porcupine_delete(porcupine_);
-        close(sock_fd_);
+        //close(sock_fd_);
     }
 
     void run() {
