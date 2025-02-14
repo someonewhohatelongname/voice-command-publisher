@@ -237,7 +237,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     try {
-        VoiceControl controller(argv[1], std::stoi(argv[2]));
+        VoiceControlNode controller(argv[1], std::stoi(argv[2]));
         controller.run();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
