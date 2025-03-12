@@ -137,7 +137,7 @@ private:
   double yaw_speed_;
   double alt_speed_;
   double pos_speed_;
-  bool armed_and_offboard_commanded_{false};
+  //bool armed_and_offboard_commanded_{false};
   std::chrono::milliseconds yaw_timer_interval_;
   std::chrono::milliseconds alt_timer_interval_;
   std::chrono::milliseconds pos_timer_interval_;
@@ -157,7 +157,7 @@ private:
 
   // Yaw adjustment callback: adjusts current_yaw_ toward target_yaw_ in small steps.
   void yaw_adjustment_cb() {
-    if (!armed_and_offboard_commanded_) return;  // Skip if not armed yet
+    if (!current_state_.armed) return;  // Skip if not armed yet
     double yaw_error = normalize_angle(target_yaw_ - current_yaw_);
     if (std::fabs(yaw_error) > 0.01) {
       if (std::fabs(yaw_error) < yaw_speed_)
@@ -175,7 +175,7 @@ private:
 
   // Altitude adjustment callback: gradually adjusts current_setpoint_z_ toward target_setpoint_z_
   void altitude_adjustment_cb() {
-    if (!armed_and_offboard_commanded_) return;  // Skip if not armed yet
+    if (!current_state_.armed) return;  // Skip if not armed yet
     double error = target_setpoint_z_ - current_setpoint_z_;
     if (std::fabs(error) > 0.01) {
       current_setpoint_z_ += (error > 0 ? alt_speed_ : -alt_speed_);
@@ -187,7 +187,7 @@ private:
 
   // Position adjustment callback: gradually adjusts current_x_ and current_y_ toward target_x_ and target_y_
   void position_adjustment_cb() {
-    if (!armed_and_offboard_commanded_) return;  // Skip if not armed yet
+    if (!current_state_.armed) return;  // (Skip if not armed yet) changed from armed_and_offboard_commanded_ to current_state.armed
     double error_x = target_x_ - current_x_;
     double error_y = target_y_ - current_y_;
     double distance = std::sqrt(error_x * error_x + error_y * error_y);
@@ -220,13 +220,14 @@ private:
           if (last_udp_cmd_.param1 == 1.0f) {
             start_offboard_ = true;
             // Reset targets when arming/offboard is commanded.
-            target_setpoint_z_ = initial_setpoint_z_;
+            //armed_and_offboard_commanded_ = true;
             target_x_ = current_x_;
             target_y_ = current_y_;
-            RCLCPP_INFO(this->get_logger(), "UDP cmd: ARM & OFFBOARD, set altitude target: %.2f", initial_setpoint_z_);
+            // RCLCPP_INFO(this->get_logger(), "UDP cmd: ARM & OFFBOARD, set altitude target: %.2f", initial_setpoint_z_);
+            // target_setpoint_z_ = initial_setpoint_z_;
           } else if (last_udp_cmd_.param1 == 0.0f) {
             land_and_disarm_ = true;
-            armed_and_offboard_commanded_ = false;  // Reset the flag here
+            //armed_and_offboard_commanded_ = false;  // Reset the flag here
             RCLCPP_INFO(this->get_logger(), "UDP cmd: LAND & DISARM, switch to manual");
           }
         } else if (last_udp_cmd_.command == 178) {
@@ -328,12 +329,15 @@ private:
       if (arming_client_->wait_for_service(1s)) {
         arming_client_->async_send_request(arm_request);
         RCLCPP_INFO(this->get_logger(), "Arming command sent");
-        armed_and_offboard_commanded_ = true;
+        //armed_and_offboard_commanded_ = true;
       } else {
         RCLCPP_WARN(this->get_logger(), "Arming service not available");
       }
       last_request_ = now;
       start_offboard_ = false;
+
+      RCLCPP_INFO(this->get_logger(), "UDP cmd: ARM & OFFBOARD, set altitude target: %.2f", initial_setpoint_z_);
+      target_setpoint_z_ = initial_setpoint_z_; //set target_setpoint-z after it is armed.
     }
 
     // Process landing and disarming command.
