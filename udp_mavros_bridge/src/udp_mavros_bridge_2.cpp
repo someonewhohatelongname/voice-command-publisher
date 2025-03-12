@@ -16,7 +16,7 @@
 #include <iostream>
 #include <cmath>
 #include <tf2/LinearMath/Quaternion.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 using namespace std::chrono_literals;
 
@@ -37,24 +37,61 @@ class OffboardNode : public rclcpp::Node
 public:
   OffboardNode()
   : Node("mavros_example"),
-    current_setpoint_z_(2.0),
+    current_setpoint_z_(0.5),
     current_x_(0.0),
     current_y_(0.0),
     current_yaw_(0.0),
     target_yaw_(0.0),
     // Initialize target values to current values:
-    target_setpoint_z_(2.0),
+    target_setpoint_z_(0.5),
     target_x_(0.0),
     target_y_(0.0),
     new_udp_command_(false),
     start_offboard_(false),
     land_and_disarm_(false),
     stop_movement_(false),
-    last_request_(this->now())
+    last_request_(this->now()),
+    initial_setpoint_z_(0.5),
+    yaw_speed_(M_PI / 180.0 * 10.0),  // ~10 degrees per update (rad)
+    alt_speed_(1),     // Altitude speed (m per update)
+    pos_speed_(1),     // Position speed (m per update)
+    yaw_timer_interval_(1s),  // Default yaw update interval
+    alt_timer_interval_(1s),  // Default altitude update interval
+    pos_timer_interval_(1s)   // Default position update interval
   {
     // Declare and get the UDP port as a parameter. Default is 9000.
-    this->declare_parameter<int>("udp_port", 9000);
+    this->declare_parameter<int>("udp_port", 14551);
+    this->declare_parameter<double>("initial_setpoint_z", 0.5);  // Default is 0.5
+    this->declare_parameter<double>("yaw_speed", 0.174532);        // Default yaw speed
+    this->declare_parameter<double>("alt_speed", 1);           // Default altitude speed
+    this->declare_parameter<double>("pos_speed", 1);           // Default position speed
+
     this->get_parameter("udp_port", udp_port_);
+    this->get_parameter("initial_setpoint_z", initial_setpoint_z_);
+    this->get_parameter("yaw_speed", yaw_speed_);
+    this->get_parameter("alt_speed", alt_speed_);
+    this->get_parameter("pos_speed", pos_speed_);
+
+    RCLCPP_INFO(this->get_logger(), "\033[33mInitial setpoint Zm\033[0m: %.2f", initial_setpoint_z_);
+    // Declare parameters as int for duration in milliseconds
+    this->declare_parameter<int>("yaw_timer_interval_ms", 1000);
+    this->declare_parameter<int>("alt_timer_interval_ms", 1000);
+    this->declare_parameter<int>("pos_timer_interval_ms", 1000);
+
+    // Get parameters and convert to std::chrono::milliseconds
+    int yaw_timer_interval_ms, alt_timer_interval_ms, pos_timer_interval_ms;
+    this->get_parameter("yaw_timer_interval_ms", yaw_timer_interval_ms);
+    this->get_parameter("alt_timer_interval_ms", alt_timer_interval_ms);
+    this->get_parameter("pos_timer_interval_ms", pos_timer_interval_ms);
+
+    yaw_timer_interval_ = std::chrono::milliseconds(yaw_timer_interval_ms);
+    alt_timer_interval_ = std::chrono::milliseconds(alt_timer_interval_ms);
+    pos_timer_interval_ = std::chrono::milliseconds(pos_timer_interval_ms);
+
+    // Print out values for debugging
+    RCLCPP_INFO(this->get_logger(), "\033[33mYaw timer interval (ms):\033[0m %d", yaw_timer_interval_ms);
+    RCLCPP_INFO(this->get_logger(), "\033[33mAltitude timer interval (ms):\033[0m %d", alt_timer_interval_ms);
+    RCLCPP_INFO(this->get_logger(), "\033[33mPosition timer interval (ms):\033[0m %d", pos_timer_interval_ms);
 
     // Set up ROS2 interfaces:
     state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
@@ -75,13 +112,14 @@ public:
     // Timer for main control loop (20 Hz)
     timer_ = this->create_wall_timer(50ms, std::bind(&OffboardNode::timer_cb, this));
     
-    // Timer for yaw adjustment (every 500ms)
-    yaw_timer_ = this->create_wall_timer(500ms, std::bind(&OffboardNode::yaw_adjustment_cb, this));
+    // Timer for yaw adjustment (every 500ms, customizable by user)
+    yaw_timer_ = this->create_wall_timer(yaw_timer_interval_, std::bind(&OffboardNode::yaw_adjustment_cb, this));
     
-    // Timer for gradual altitude adjustment (every 50ms)
-    alt_timer_ = this->create_wall_timer(50ms, std::bind(&OffboardNode::altitude_adjustment_cb, this));
-    // Timer for gradual position adjustment (every 500ms)
-    pos_timer_ = this->create_wall_timer(300ms, std::bind(&OffboardNode::position_adjustment_cb, this));
+    // Timer for gradual altitude adjustment (every 100ms, customizable by user)
+    alt_timer_ = this->create_wall_timer(alt_timer_interval_, std::bind(&OffboardNode::altitude_adjustment_cb, this));
+    
+    // Timer for gradual position adjustment (every 100ms, customizable by user)
+    pos_timer_ = this->create_wall_timer(pos_timer_interval_, std::bind(&OffboardNode::position_adjustment_cb, this));
 
     RCLCPP_INFO(this->get_logger(), "MAVROS example node with native UDP receiver started on port %d", udp_port_);
   }
@@ -94,6 +132,16 @@ public:
   }
 
 private:
+
+  double initial_setpoint_z_;  
+  double yaw_speed_;
+  double alt_speed_;
+  double pos_speed_;
+  std::chrono::milliseconds yaw_timer_interval_;
+  std::chrono::milliseconds alt_timer_interval_;
+  std::chrono::milliseconds pos_timer_interval_;
+  
+
   // Helper function to normalize angle to [-pi, pi]
   double normalize_angle(double angle)
   {
@@ -109,28 +157,29 @@ private:
   // Yaw adjustment callback: adjusts current_yaw_ toward target_yaw_ in small steps.
   void yaw_adjustment_cb() {
     double yaw_error = normalize_angle(target_yaw_ - current_yaw_);
-    const double yaw_step = M_PI / 180.0 * 5.0;  // 5° per cycle (~0.0873 rad)
     if (std::fabs(yaw_error) > 0.01) {
-      if (std::fabs(yaw_error) < yaw_step)
+      if (std::fabs(yaw_error) < yaw_speed_)
         current_yaw_ = target_yaw_;
       else if (yaw_error > 0)
-        current_yaw_ += yaw_step;
+        current_yaw_ += yaw_speed_;
       else
-        current_yaw_ -= yaw_step;
+        current_yaw_ -= yaw_speed_;
       current_yaw_ = normalize_angle(current_yaw_);
     }
+
+    // Print the current yaw and target yaw
+    RCLCPP_INFO(this->get_logger(), "Current Yaw: %.2f rad, Target Yaw: %.2f rad", current_yaw_, target_yaw_);
   }
 
   // Altitude adjustment callback: gradually adjusts current_setpoint_z_ toward target_setpoint_z_
   void altitude_adjustment_cb() {
     double error = target_setpoint_z_ - current_setpoint_z_;
-    const double alt_step = 0.1; // Adjust altitude by 0.1 m per cycle
     if (std::fabs(error) > 0.01) {
-      if (std::fabs(error) < alt_step)
-        current_setpoint_z_ = target_setpoint_z_;
-      else
-        current_setpoint_z_ += (error > 0 ? alt_step : -alt_step);
+      current_setpoint_z_ += (error > 0 ? alt_speed_ : -alt_speed_);
     }
+
+    // Print the current altitude and target altitude
+    RCLCPP_INFO(this->get_logger(), "Current Altitude: %.2f m, Target Altitude: %.2f m", current_setpoint_z_, target_setpoint_z_);
   }
 
   // Position adjustment callback: gradually adjusts current_x_ and current_y_ toward target_x_ and target_y_
@@ -138,13 +187,16 @@ private:
     double error_x = target_x_ - current_x_;
     double error_y = target_y_ - current_y_;
     double distance = std::sqrt(error_x * error_x + error_y * error_y);
-    const double pos_step = 0.1; // Adjust position by 0.1 m per cycle
     if (distance > 0.01) {
-      double step_ratio = std::min(pos_step / distance, 1.0);
+      double step_ratio = std::min(pos_speed_ / distance, 1.0);
       current_x_ += error_x * step_ratio;
       current_y_ += error_y * step_ratio;
     }
+
+    // Print the current position and target position
+    RCLCPP_INFO(this->get_logger(), "Current Position: (%.2f, %.2f), Target Position: (%.2f, %.2f)", current_x_, current_y_, target_x_, target_y_);
   }
+
 
   // Callback for receiving vehicle state updates.
   void state_cb(const mavros_msgs::msg::State::SharedPtr msg)
@@ -164,7 +216,7 @@ private:
           if (last_udp_cmd_.param1 == 1.0f) {
             start_offboard_ = true;
             // Reset targets when arming/offboard is commanded.
-            target_setpoint_z_ = 2.0;
+            target_setpoint_z_ = initial_setpoint_z_;
             target_x_ = current_x_;
             target_y_ = current_y_;
             RCLCPP_INFO(this->get_logger(), "UDP cmd: ARM & OFFBOARD, set altitude target 2.0m");
