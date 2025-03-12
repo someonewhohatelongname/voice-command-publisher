@@ -37,13 +37,13 @@ class OffboardNode : public rclcpp::Node
 public:
   OffboardNode()
   : Node("mavros_example"),
-    current_setpoint_z_(0.5),
+    current_setpoint_z_(0.0),
     current_x_(0.0),
     current_y_(0.0),
     current_yaw_(0.0),
     target_yaw_(0.0),
     // Initialize target values to current values:
-    target_setpoint_z_(0.5),
+    target_setpoint_z_(3.0),
     target_x_(0.0),
     target_y_(0.0),
     new_udp_command_(false),
@@ -51,20 +51,20 @@ public:
     land_and_disarm_(false),
     stop_movement_(false),
     last_request_(this->now()),
-    initial_setpoint_z_(0.5),
-    yaw_speed_(M_PI / 180.0 * 10.0),  // ~10 degrees per update (rad)
-    alt_speed_(1),     // Altitude speed (m per update)
-    pos_speed_(1),     // Position speed (m per update)
-    yaw_timer_interval_(1s),  // Default yaw update interval
-    alt_timer_interval_(1s),  // Default altitude update interval
-    pos_timer_interval_(1s)   // Default position update interval
+    initial_setpoint_z_(3.0),
+    yaw_speed_(M_PI / 180.0 * 3.0),  // ~5 degrees per update (rad)
+    alt_speed_(0.1),     // Altitude speed (m per update)
+    pos_speed_(0.1),     // Position speed (m per update)
+    yaw_timer_interval_(100ms),  // Default yaw update interval
+    alt_timer_interval_(100ms),  // Default altitude update interval
+    pos_timer_interval_(100ms)   // Default position update interval
   {
     // Declare and get the UDP port as a parameter. Default is 9000.
     this->declare_parameter<int>("udp_port", 14551);
-    this->declare_parameter<double>("initial_setpoint_z", 0.5);  // Default is 0.5
-    this->declare_parameter<double>("yaw_speed", 0.174532);        // Default yaw speed
-    this->declare_parameter<double>("alt_speed", 1);           // Default altitude speed
-    this->declare_parameter<double>("pos_speed", 1);           // Default position speed
+    this->declare_parameter<double>("initial_setpoint_z", 3.0);  // Default is 0.5
+    this->declare_parameter<double>("yaw_speed", M_PI / 180.0 * 3.0);        // Default yaw speed
+    this->declare_parameter<double>("alt_speed", 0.1);           // Default altitude speed
+    this->declare_parameter<double>("pos_speed", 0.1);           // Default position speed
 
     this->get_parameter("udp_port", udp_port_);
     this->get_parameter("initial_setpoint_z", initial_setpoint_z_);
@@ -72,11 +72,11 @@ public:
     this->get_parameter("alt_speed", alt_speed_);
     this->get_parameter("pos_speed", pos_speed_);
 
-    RCLCPP_INFO(this->get_logger(), "\033[33mInitial setpoint Zm\033[0m: %.2f", initial_setpoint_z_);
+    RCLCPP_INFO(this->get_logger(), "\033[33mInitial setpoint Z (m)\033[0m: %.2f", initial_setpoint_z_);
     // Declare parameters as int for duration in milliseconds
-    this->declare_parameter<int>("yaw_timer_interval_ms", 1000);
-    this->declare_parameter<int>("alt_timer_interval_ms", 1000);
-    this->declare_parameter<int>("pos_timer_interval_ms", 1000);
+    this->declare_parameter<int>("yaw_timer_interval_ms", 100);
+    this->declare_parameter<int>("alt_timer_interval_ms", 100);
+    this->declare_parameter<int>("pos_timer_interval_ms", 100);
 
     // Get parameters and convert to std::chrono::milliseconds
     int yaw_timer_interval_ms, alt_timer_interval_ms, pos_timer_interval_ms;
@@ -89,9 +89,9 @@ public:
     pos_timer_interval_ = std::chrono::milliseconds(pos_timer_interval_ms);
 
     // Print out values for debugging
-    RCLCPP_INFO(this->get_logger(), "\033[33mYaw timer interval (ms):\033[0m %d", yaw_timer_interval_ms);
-    RCLCPP_INFO(this->get_logger(), "\033[33mAltitude timer interval (ms):\033[0m %d", alt_timer_interval_ms);
-    RCLCPP_INFO(this->get_logger(), "\033[33mPosition timer interval (ms):\033[0m %d", pos_timer_interval_ms);
+    RCLCPP_INFO(this->get_logger(), "\033[33mYaw speed (rad/s):\033[0m %f", yaw_speed_/yaw_timer_interval_ms * 100);
+    RCLCPP_INFO(this->get_logger(), "\033[33mAltitude speed (m/s):\033[0m %f", alt_speed_/alt_timer_interval_ms * 100);
+    RCLCPP_INFO(this->get_logger(), "\033[33mPosition speed (m/s):\033[0m %f", pos_speed_/pos_timer_interval_ms * 100);
 
     // Set up ROS2 interfaces:
     state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
@@ -137,6 +137,7 @@ private:
   double yaw_speed_;
   double alt_speed_;
   double pos_speed_;
+  bool armed_and_offboard_commanded_{false};
   std::chrono::milliseconds yaw_timer_interval_;
   std::chrono::milliseconds alt_timer_interval_;
   std::chrono::milliseconds pos_timer_interval_;
@@ -156,6 +157,7 @@ private:
 
   // Yaw adjustment callback: adjusts current_yaw_ toward target_yaw_ in small steps.
   void yaw_adjustment_cb() {
+    if (!armed_and_offboard_commanded_) return;  // Skip if not armed yet
     double yaw_error = normalize_angle(target_yaw_ - current_yaw_);
     if (std::fabs(yaw_error) > 0.01) {
       if (std::fabs(yaw_error) < yaw_speed_)
@@ -168,22 +170,24 @@ private:
     }
 
     // Print the current yaw and target yaw
-    RCLCPP_INFO(this->get_logger(), "Current Yaw: %.2f rad, Target Yaw: %.2f rad", current_yaw_, target_yaw_);
+    // RCLCPP_INFO(this->get_logger(), "Current Yaw: %.2f rad, Target Yaw: %.2f rad", current_yaw_, target_yaw_);
   }
 
   // Altitude adjustment callback: gradually adjusts current_setpoint_z_ toward target_setpoint_z_
   void altitude_adjustment_cb() {
+    if (!armed_and_offboard_commanded_) return;  // Skip if not armed yet
     double error = target_setpoint_z_ - current_setpoint_z_;
     if (std::fabs(error) > 0.01) {
       current_setpoint_z_ += (error > 0 ? alt_speed_ : -alt_speed_);
     }
 
     // Print the current altitude and target altitude
-    RCLCPP_INFO(this->get_logger(), "Current Altitude: %.2f m, Target Altitude: %.2f m", current_setpoint_z_, target_setpoint_z_);
+    // RCLCPP_INFO(this->get_logger(), "Current Altitude: %.2f m, Target Altitude: %.2f m", current_setpoint_z_, target_setpoint_z_);
   }
 
   // Position adjustment callback: gradually adjusts current_x_ and current_y_ toward target_x_ and target_y_
   void position_adjustment_cb() {
+    if (!armed_and_offboard_commanded_) return;  // Skip if not armed yet
     double error_x = target_x_ - current_x_;
     double error_y = target_y_ - current_y_;
     double distance = std::sqrt(error_x * error_x + error_y * error_y);
@@ -194,7 +198,7 @@ private:
     }
 
     // Print the current position and target position
-    RCLCPP_INFO(this->get_logger(), "Current Position: (%.2f, %.2f), Target Position: (%.2f, %.2f)", current_x_, current_y_, target_x_, target_y_);
+    // RCLCPP_INFO(this->get_logger(), "Current Position: (%.2f, %.2f), Target Position: (%.2f, %.2f)", current_x_, current_y_, target_x_, target_y_);
   }
 
 
@@ -219,9 +223,10 @@ private:
             target_setpoint_z_ = initial_setpoint_z_;
             target_x_ = current_x_;
             target_y_ = current_y_;
-            RCLCPP_INFO(this->get_logger(), "UDP cmd: ARM & OFFBOARD, set altitude target 2.0m");
+            RCLCPP_INFO(this->get_logger(), "UDP cmd: ARM & OFFBOARD, set altitude target: %.2f", initial_setpoint_z_);
           } else if (last_udp_cmd_.param1 == 0.0f) {
             land_and_disarm_ = true;
+            armed_and_offboard_commanded_ = false;  // Reset the flag here
             RCLCPP_INFO(this->get_logger(), "UDP cmd: LAND & DISARM, switch to manual");
           }
         } else if (last_udp_cmd_.command == 178) {
@@ -247,7 +252,10 @@ private:
           // Immediately stop current forward movement by setting target position to current position.
           target_x_ = current_x_;
           target_y_ = current_y_;
-          RCLCPP_INFO(this->get_logger(), "UDP cmd: STOP, holding current position (%.2f, %.2f)", current_x_, current_y_);
+          target_yaw_ = current_yaw_;
+          target_setpoint_z_ = current_setpoint_z_;
+          RCLCPP_INFO(this->get_logger(), "UDP cmd: STOP ALL MOVEMENT, holding position (%.2f, %.2f), altitude %.2f, yaw %.2f rad", 
+                      current_x_, current_y_, current_setpoint_z_, current_yaw_);
         } else if (last_udp_cmd_.command == 180) {
           double distance = static_cast<double>(last_udp_cmd_.param1);
           // Update target position based on current yaw.
@@ -294,6 +302,9 @@ private:
     pose.pose.orientation = tf2::toMsg(q);
     
     setpoint_pub_->publish(pose);
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
+                     "Publishing setpoint: x=%.2f, y=%.2f, z=%.2f", 
+                     current_x_, current_y_, current_setpoint_z_);
 
     auto now = this->now();
 
@@ -317,6 +328,7 @@ private:
       if (arming_client_->wait_for_service(1s)) {
         arming_client_->async_send_request(arm_request);
         RCLCPP_INFO(this->get_logger(), "Arming command sent");
+        armed_and_offboard_commanded_ = true;
       } else {
         RCLCPP_WARN(this->get_logger(), "Arming service not available");
       }
@@ -400,7 +412,7 @@ private:
   bool new_udp_command_;
   bool running_{false};
 
-  double current_setpoint_z_;
+  double current_setpoint_z_{0.0};
   double current_x_{0.0};
   double current_y_{0.0};
   double current_yaw_{0.0};  // in radians
