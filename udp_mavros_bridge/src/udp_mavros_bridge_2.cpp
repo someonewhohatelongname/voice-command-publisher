@@ -20,9 +20,9 @@
 
 using namespace std::chrono_literals;
 
-// Structure for the UDP command data (17 bytes total)
+// Structure for the UDP command data (15 bytes total)
 struct UdpCommand {
-  uint32_t command;           // 4 bytes now instead of 2
+  uint16_t command;           // 2 bytes 
   float param1;               // 4 bytes
   float param2;               // 4 bytes
   uint8_t target_system;      // 1 byte
